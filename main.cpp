@@ -1,21 +1,41 @@
 #include <cstddef>
 #include <Windows.h>
 
+IniSettingCollection *IniSettingCollection::GetIniPrefs()
+{
+	return *(IniSettingCollection**)0x11F35A0;
+}
+
+template<typename T> requires (sizeof(T) == sizeof(int) && alignof(T) == alignof(int))
 struct IniPrefSetting {
-	void **vtable;
-	float value;
+	T value;
 	const char *name;
 
-	IniPrefSetting(const char *name, float value)
+	constexpr IniPrefSetting(const char *name, T value) :
+		name(name), value(value)
 	{
-		ThisCall(0x4DE370, this, name, value);
+		IniSettingCollection::GetIniPrefs()->AddSetting((Setting*)this);
+	}
+
+	virtual ~IniPrefSetting()
+	{
+		IniSettingCollection::GetIniPrefs()->RemoveSetting((Setting*)this);
+	}
+
+	virtual bool vfunc01()
+	{
+		return false;
 	}
 };
 
-namespace ini::Viewmodel {
-auto fOffsetX = IniPrefSetting("fOffsetX:Viewmodel",  2.f);
-auto fOffsetY = IniPrefSetting("fOffsetY:Viewmodel",  3.f);
-auto fOffsetZ = IniPrefSetting("fOffsetZ:Viewmodel", -5.f);
+static auto &Ini()
+{
+	static struct {
+		IniPrefSetting<float> fOffsetX = {"fOffsetX:Viewmodel",  2.f};
+		IniPrefSetting<float> fOffsetY = {"fOffsetY:Viewmodel",  3.f};
+		IniPrefSetting<float> fOffsetZ = {"fOffsetZ:Viewmodel", -5.f};
+	} ini;
+	return ini;
 }
 
 static void __fastcall hook_NiAVObject_SetLocalTranslation(
@@ -29,9 +49,9 @@ static void __fastcall hook_NiAVObject_SetLocalTranslation(
 	if (InterfaceManager::GetSingleton()->pipBoyMode != 0)
 		return;
 
-	object->m_transformLocal.translate.x += ini::Viewmodel::fOffsetX.value;
-	object->m_transformLocal.translate.y += ini::Viewmodel::fOffsetY.value;
-	object->m_transformLocal.translate.z += ini::Viewmodel::fOffsetZ.value;
+	object->m_transformLocal.translate.x += Ini().fOffsetX.value;
+	object->m_transformLocal.translate.y += Ini().fOffsetY.value;
+	object->m_transformLocal.translate.z += Ini().fOffsetZ.value;
 }
 
 static void patch_call_rel32(const uintptr_t addr, const void *dest)
@@ -48,11 +68,13 @@ extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSEInterface *nvse
 	info->infoVersion = PluginInfo::kInfoVersion;
 	info->name = "Viewmodel Adjustment";
 	info->version = 2;
-	return true;
+	return !nvse->isEditor;
 }
 
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(NVSEInterface *nvse)
 {
+	// Add variables
+	Ini();
 	// Add offset after animating
 	patch_call_rel32(0x4F047D, hook_NiAVObject_SetLocalTranslation);
 	patch_call_rel32(0x4F0551, hook_NiAVObject_SetLocalTranslation);
